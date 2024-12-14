@@ -1,0 +1,37 @@
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title></title>
+  <link rel="stylesheet" type="text/css" href="options.css">
+  <script src="../lib/jquery.min.js" type="text/javascript" charset="utf-8"></script>
+  <script src="options.js" type="text/javascript" charset="utf-8"></script>
+</head>
+
+<body>
+  <div class="login-page">
+    <div class="form">
+      <div class="logout-container">
+        <h2><a target="_blank" id="login-user">XXX</a>でログイン済みです。</h2>
+        <p class="message">Please make sure you have enabled <a target="_blank" href="https://script.google.com/home/usersettings">Script API</a></p>
+        <button id="logout">ログアウト</button>
+        <p class="warning">After logout, remember to delete the <a id="token" href="#">access token</a></p>
+      </div>
+      <div class="login-container github-login-container">
+        <div class="login-item login-item-basic">
+          <input id="username" type="text" placeholder="username" />
+          <p class="label"><a target="_blank" href="https://github.com/settings/tokens">GitHub accessToken</a>(with
+            <b>repo</b> and <b>gist</b>
+            scope):</p>
+          <input id="accesstoken" type="password" placeholder="github access token" />
+        </div>
+        <div class="login-item login-item-otp">
+          <input id="otp" type="text" placeholder="authentication code">
+        </div>
+        <button id="login">ログイン</button>
+        <p class="error" style="display: none">Can not create access token, please check your username and password.</p>
+      </div>
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,32 @@
+{
+  "version": "0.1",
+  "manifest_version": 3,
+  "name": "Scratch-GitHub Integrator",
+  "author": "a.utsuki@gmail.com",    
+  "description": "ScratchのJSONファイルをgithubに保存します",
+  "options_ui": {
+    "page":"options/options.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action":{},
+  "content_scripts": [
+    {
+      "matches": ["https://api.scratch.mit.edu/projects/*"], 
+      "js": ["src/scratch-sb3.js"]  
+    }
+  ],
+  "host_permissions": [
+    "https://api.scratch.mit.edu/projects/*",
+    "https://scratch.mit.edu/projects/*"
+  ],
+  "permissions": [
+    "storage", 
+    "activeTab", 
+    "identity",
+    "notifications",
+    "scripting"
+  ]
+}
+  

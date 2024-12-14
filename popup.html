@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" type="text/css" href="css/primer.css">
+  <script src="lib/jquery.min.js" type="text/javascript" charset="utf-8"></script>
+  <!-- <script src="lib/base64.min.js" type="text/javascript" charset="utf-8"></script>-->
+  <script src="src/github-api.js" type="text/javascript" charset="utf-8"></script>
+  <script src="src/main.js" type="text/javascript" charset="utf-8"></script>
+</head>
+
+<body>
+  <div class="continer scratch-hub-page p-3">
+    <div class="blankslate">
+      <h5>ScratchのプロジェクトをGithubに保存します</h5>
+    </div>
+    <form>
+      <dl class="form-group">
+        <dt><label>リポジトリ</label></dt>
+        <dd>
+          <select id="repo" class="form-select select-sm repo-menu"></select>
+        </dd>
+      </dl>
+      <dl class="form-group">
+        <dt><label>ブランチ</label></dt>
+        <dd>
+          <input type="text" id="branch" readonly>
+        </dd>
+      </dl>
+      <dl class="form-group">
+        <dt><label>コメント</label></dt>
+        <dd>
+          <input id="message" class="form-control input-sm" type="text" placeholder="コメントを入力してください..." />
+        </dd>
+      </dl>
+      <button id="commit" class="btn btn-primary disabled" type="button">githubに保存</button>
+    </form>
+    <div id="result" class="flash d-none m-3"></div>
+  </div>
+</body>
+
+</html>
