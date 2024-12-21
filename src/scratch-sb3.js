@@ -29,6 +29,9 @@ fetch(projectMetaUrl)
         // プロジェクトのJSONデータをZIPに追加
         zip.file("project.json", projectJson);
 
+        // コスチュームとサウンドのアセットを取得するためのPromiseリスト
+        const fetchPromises = [];
+
         // ターゲット（ステージやスプライト）の情報を取得
         projectData.targets.forEach((target) => {
           // コスチューム情報を取得
@@ -36,12 +39,7 @@ fetch(projectMetaUrl)
             const md5ext = costume.md5ext;
             const assetUrl = `https://assets.scratch.mit.edu/internalapi/asset/${md5ext}/get/`;
 
-            chrome.runtime.sendMessage({
-              log: `Asset URL for costume "${costume.name}": ${assetUrl}`,
-            });
-
-            // アセットをフェッチしてZIPに追加
-            fetch(assetUrl)
+            const costumePromise = fetch(assetUrl)
               .then((response) => {
                 if (!response.ok) {
                   throw new Error(
@@ -51,14 +49,16 @@ fetch(projectMetaUrl)
                 return response.blob();
               })
               .then((blob) => {
-                zip.file(md5ext, blob);
+                zip.file(md5ext, blob); // ZIPにアセットを追加
               })
-              .catch((error) =>
+              .catch((error) => {
                 chrome.runtime.sendMessage({
                   log: `Error fetching costume asset ${costume.name}:`,
-                  error,
-                })
-              );
+                  error: error.message,
+                });
+              });
+
+            fetchPromises.push(costumePromise);
           });
 
           // サウンド情報を取得
@@ -66,26 +66,40 @@ fetch(projectMetaUrl)
             const md5ext = sound.md5ext;
             const assetUrl = `https://assets.scratch.mit.edu/internalapi/asset/${md5ext}/get/`;
 
-            // サウンドアセットをフェッチしてZIPに追加
-            fetch(assetUrl)
-              .then((response) => response.blob())
-              .then((blob) => {
-                zip.file(md5ext, blob);
+            const soundPromise = fetch(assetUrl)
+              .then((response) => {
+                if (!response.ok) {
+                  throw new Error(
+                    `Failed to fetch ${sound.name} from ${assetUrl}`
+                  );
+                }
+                return response.blob();
               })
-              .catch((error) =>
+              .then((blob) => {
+                zip.file(md5ext, blob); // ZIPにサウンドを追加
+              })
+              .catch((error) => {
                 chrome.runtime.sendMessage({
                   log: `Error fetching sound asset ${sound.name}:`,
-                  error,
-                })
-              );
+                  error: error.message,
+                });
+              });
+
+            fetchPromises.push(soundPromise);
           });
         });
 
-        // ZIPファイルを作成してダウンロード
-        zip.generateAsync({ type: "blob" }).then((content) => {
-          // ファイル名を指定してダウンロード
-          saveAs(content, "project.zip");
-        });
+        // すべてのアセットのフェッチが完了した後にZIPを生成
+        Promise.all(fetchPromises)
+          .then(() => {
+            zip.generateAsync({ type: "blob" }).then((content) => {
+              // ZIPファイルをダウンロード（FileSaver.jsが必要）
+              saveAs(content, "project.sb3");
+            });
+          })
+          .catch((error) => {
+            console.error("Error generating ZIP:", error);
+          });
 
         /*
         // ターゲット（ステージやスプライト）の情報を取得
