@@ -49,7 +49,11 @@ $(() => {
                 chrome.scripting.executeScript(
                   {
                     target: { tabId: tabId },
-                    files: ["src/scratch-sb3.js"],
+                    files: [
+                      "lib/jszip.min.js",
+                      "lib/FileSaver.min.js",
+                      "src/scratch-sb3.js",
+                    ],
                   },
                   (injectionResult) => {
                     if (chrome.runtime.lastError) {

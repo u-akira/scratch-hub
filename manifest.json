@@ -14,11 +14,12 @@
   "content_scripts": [
     {
       "matches": ["https://api.scratch.mit.edu/projects/*"], 
-      "js": ["src/scratch-sb3.js"]  
+      "js": ["lib/jszip.min.js","lib/FileSaver.min.js","src/scratch-sb3.js"]  
     }
   ],
   "host_permissions": [
     "https://api.scratch.mit.edu/projects/*",
+    "https://assets.scratch.mit.edu/internalapi/asset/*",
     "https://scratch.mit.edu/projects/*"
   ],
   "permissions": [
