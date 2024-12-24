@@ -18,8 +18,10 @@ $(() => {
           $("#commit").addClass("disabled");
           $("#result").addClass("d-none");
 
-          // プロジェクトIDを取得 (必要に応じて取得方法を変更)
+          //getParam();
           const projectId = $("#branch").val();
+          const repository = $("#repo").val();
+          const message = $("#message").val();
 
           if (!projectId) {
             console.error("プロジェクトIDが未指定です。");
@@ -39,10 +41,12 @@ $(() => {
             chrome.scripting.executeScript(
               {
                 target: { tabId: tabId },
-                args: [projectId],
-                func: (projectId) => {
+                args: [projectId, repository, message],
+                func: (projectId, repository, message) => {
                   console.log("取得したID:", projectId);
                   window.projectId = projectId;
+                  window.repository = repository;
+                  window.message = message;
                 },
               },
               () => {

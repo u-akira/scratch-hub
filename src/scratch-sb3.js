@@ -1,14 +1,18 @@
 //----------------------------------------------------------
 // 1. tokenを取得する api.scratch.mit.edu/projects/${id}
 // 2. project.jsonをダウンロードする https://projects.scratch.mit.edu/${id}?token={$token}
-// 3. project.jsonを読み込み、assets情報をダウンロードする
-// 4. project_idフォルダ配下に保存
-// 5. zipで圧縮する
-// 6. sb3にリネームする
+// 3. project.jsonを読み込み、assets情報を取得する
+// 4. 全て取得後、zipファイルを作成する
+// 5. zipファイルをsb3にリネームし、githubにコミットする
 //----------------------------------------------------------
 
 const projectId = self.projectId;
-//chrome.storage.local.clear();
+const repository = self.repository;
+const message = self.message;
+
+chrome.runtime.sendMessage({
+  log: `パラメータ: ${repository},${message}`,
+});
 
 const projectMetaUrl = `https://api.scratch.mit.edu/projects/${projectId}`;
 
@@ -76,7 +80,7 @@ fetch(projectMetaUrl)
                 return response.blob();
               })
               .then((blob) => {
-                zip.file(md5ext, blob); // ZIPにサウンドを追加
+                zip.file(md5ext, blob);
               })
               .catch((error) => {
                 chrome.runtime.sendMessage({
@@ -93,6 +97,7 @@ fetch(projectMetaUrl)
         Promise.all(fetchPromises)
           .then(() => {
             zip.generateAsync({ type: "blob" }).then((content) => {
+              // コミット
               // ZIPファイルをダウンロード（FileSaver.jsが必要）
               saveAs(content, "project.sb3");
             });
@@ -100,53 +105,6 @@ fetch(projectMetaUrl)
           .catch((error) => {
             console.error("Error generating ZIP:", error);
           });
-
-        /*
-        // ターゲット（ステージやスプライト）の情報を取得
-        projectData.targets.forEach((target) => {
-          // コスチューム情報を取得
-          target.costumes.forEach((costume) => {
-            const assetId = costume.assetId;
-            const md5ext = costume.md5ext;
-            const assetUrl = `https://assets.scratch.mit.edu/internalapi/asset/${md5ext}/get/`;
-
-            chrome.runtime.sendMessage({
-              log: `Asset URL for costume "${costume.name}": ${assetUrl}`,
-            });
-          });
-
-          // サウンド情報を取得
-          target.sounds.forEach((sound) => {
-            const assetId = sound.assetId;
-            const md5ext = sound.md5ext;
-            const assetUrl = `https://assets.scratch.mit.edu/internalapi/asset/${md5ext}/get/`;
-
-            chrome.runtime.sendMessage({
-              log: `Asset URL for sound "${sound.name}": ${assetUrl}`,
-            });
-          });
-        });
-        */
-
-        /*
-        // Storage に保存する
-        const storageKey = `${projectId}_project`;
-        const saveData = {};
-        saveData[storageKey] = projectJson;
-
-        chrome.storage.local.set(saveData, () => {
-          if (chrome.runtime.lastError) {
-            chrome.runtime.sendMessage({
-              log: `Storage保存エラー: ${chrome.runtime.lastError.message}`,
-            });
-            console.error("Storage保存エラー:", chrome.runtime.lastError);
-          } else {
-            chrome.runtime.sendMessage({
-              log: `プロジェクトデータを保存しました: ${storageKey}`,
-            });
-          }
-        });
-        */
       })
       .catch((error) => {
         chrome.runtime.sendMessage({
@@ -161,3 +119,79 @@ fetch(projectMetaUrl)
     });
     console.error("APIエラー:", error);
   });
+
+function pushToGithub(param) {
+  const repository = param.repository;
+  const branch = projectId;
+  const message = param.message;
+  initContext()
+    .then(initUserInfo)
+    .then(checkGitHubAPI)
+    .then(
+      () =>
+        new Promise((resolve) => {
+          github.repo = repository;
+          resolve();
+        })
+    )
+    .then(github.get(`repos/${github.user}/${github.repo}/branches/${branch}`))
+    .then((branch) => {
+      if (!(context.name && context.email)) {
+        context.name = branch.commit.commit.author.name;
+        context.email = branch.commit.commit.author.email;
+      }
+      var sha = branch.commit.commit.tree.sha;
+      return github.get(
+        `repos/${github.user}/${github.repo}/git/trees/${sha}`
+      )();
+    })
+    .then((tree) => existContents(filepath, tree.tree, repository))
+    .then((exist) => {
+      if (exist.ok) {
+        return github.get(
+          `repos/${github.user}/${github.repo}/git/blobs/${exist.sha}`
+        )();
+      } else {
+        return new Promise((resolve) => {
+          resolve({});
+        });
+      }
+    })
+    .then((blob) => {
+      var data = {};
+      var content = `- ${url} : ${message}`;
+      if (blob.content) {
+        content = Base64.decode(blob.content) + `\n${content}`;
+        data.sha = blob.sha;
+      }
+      $.extend(data, {
+        message: message ? message : "Bookmark!",
+        committer: {
+          name: context.name,
+          email: context.email,
+        },
+        content: Base64.encode(content),
+        branch: branch,
+      });
+      return github.put(
+        `repos/${github.user}/${github.repo}/contents/${filepath}`,
+        data
+      )();
+    })
+    .then(() => {
+      $("#commit").removeClass("disabled");
+      $("#result")
+        .removeClass("d-none")
+        .removeClass("flash-error")
+        .text("Succsess!");
+      chrome.storage.sync.set({
+        repository: repository,
+        branch: branch,
+        filepath: filepath,
+      });
+    })
+    .catch((err) => {
+      $("#commit").removeClass("disabled");
+      $("#result").removeClass("d-none").addClass("flash-error").text(err);
+    });
+}
