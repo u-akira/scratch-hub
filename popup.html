@@ -5,7 +5,6 @@
   <meta charset="utf-8">
   <link rel="stylesheet" type="text/css" href="css/primer.css">
   <link rel="stylesheet" type="text/css" href="css/main.css">
-  <link rel="stylesheet" href="css/all.min.css">
   <script src="lib/jquery.min.js" type="text/javascript" charset="utf-8"></script>
   <script src="lib/jszip.min.js"></script>
   <script src="lib/FileSaver.min.js"></script>
@@ -26,7 +25,7 @@
       </nav>
     </div>
 
-    <div id="commit" style="padding: 16px;">
+    <div id="commit" class="tab-content">
       <h5 class="mb-3">Scratchプロジェクトの保存</h5>
       <form>
         <dl class="form-group">
@@ -47,12 +46,12 @@
             <input id="message" class="form-control input-sm" type="text" placeholder="コメントを入力してください..." />
           </dd>
         </dl>
-        <button id="commit" class="btn btn-primary disabled" type="button">githubに保存</button>
+        <button id="commit" class="btn btn-primary" type="button">githubに保存</button>
       </form>
       <div id="result" class="flash d-none m-3"></div>
     </div>
 
-    <div id="history" style="padding: 16px; display: none;">
+    <div id="history" class="tab-content" style="display: none;">
       <h5 class="mb-3">保存履歴</h5>
       <div id="message-list" class="Box p-3 mb-3">
         <ul class="list-style-none">

@@ -3,6 +3,252 @@
 let github;
 let context = {};
 
+$(document).ready(() => {
+  initializeApp();
+});
+
+function initializeApp() {
+  initContext()
+    .then(setAllRepositories)
+    .then(getProjectId)
+    .then(setAllCommits)
+    .then(enableCommitButton)
+    .catch(handleError);
+
+  setupEventHandlers();
+}
+
+function initContext() {
+  context = {};
+  return new Promise((resolve, reject) => {
+    const items = ["token", "user", "baseUrl", "repository"];
+    chrome.storage.sync.get(items, (item) => {
+      if (!item.token)
+        return reject(new Error("GitHub トークンが設定されていません。"));
+      github = new GitHubAPI(
+        item.baseUrl,
+        item.user,
+        item.repository,
+        item.token
+      );
+      resolve();
+    });
+  });
+}
+
+function setAllRepositories() {
+  return fetchAllRepositories().then((repos) => {
+    $(".repo-menu").empty();
+    repos.forEach((repo) => {
+      const option = `<option value="${repo.name}">${repo.name}</option>`;
+      $(".repo-menu").append(option);
+    });
+  });
+}
+
+function fetchAllRepositories() {
+  const allRepos = [];
+  const fetchPage = (page) =>
+    $.ajax({
+      url: `${github.baseUrl}/user/repos?affiliation=owner&per_page=100&page=${page}`,
+      headers: { Authorization: `token ${github.token}` },
+    }).then((repos) => {
+      allRepos.push(...repos);
+      return repos.length ? fetchPage(page + 1) : allRepos;
+    });
+
+  return fetchPage(1);
+}
+
+function getProjectId() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0) {
+        const projectId = tabs[0].url.split("/").filter(Boolean).pop();
+        $("#branch").val(projectId);
+      }
+    });
+
+    chrome.storage.sync.get(["repository"], (item) => {
+      $("#repository").val(item.repository || "");
+      resolve();
+    });
+  });
+}
+
+function setAllCommits() {
+  return fetchAllCommits().then((commits) => {
+    $("#message-list ul").empty();
+    commits.forEach(renderCommit);
+  });
+}
+
+function fetchAllCommits() {
+  const allCommits = [];
+  const repo = $("#repository").val();
+  const branch = $("#branch").val();
+
+  return chrome.storage.sync.get(["user"]).then(({ user }) => {
+    const fetchPage = (page) =>
+      $.ajax({
+        url: `${github.baseUrl}/repos/${user}/${repo}/commits?sha=${branch}&per_page=100&page=${page}`,
+        headers: { Authorization: `token ${github.token}` },
+      }).then((commits) => {
+        allCommits.push(...commits);
+        return commits.length ? fetchPage(page + 1) : allCommits;
+      });
+
+    return fetchPage(1);
+  });
+}
+
+function renderCommit(commit) {
+  const date = new Date(commit.commit.author.date).toLocaleString();
+  const message = commit.commit.message;
+
+  const li = $("<li></li>").addClass("Box-row");
+  const downloadButton = createDownloadButton();
+  const dateSpan = $("<span></span>").addClass("commit-date").text(date);
+  const messageSpan = $("<span></span>")
+    .addClass("commit-message")
+    .text(message);
+
+  li.append(dateSpan, downloadButton, $("<br>"), messageSpan);
+  $("#message-list ul").append(li);
+}
+
+function createDownloadButton() {
+  return $("<button></button>")
+    .addClass("btn btn-secondary btn-sm download")
+    .append(
+      $("<img>")
+        .attr("src", "image/download.svg")
+        .attr("alt", "Download")
+        .addClass("icon")
+    );
+}
+
+function enableCommitButton() {
+  $("#commit").removeClass("disabled");
+}
+
+function handleError(error) {
+  console.error(error);
+  $("#commit").removeClass("disabled");
+  $("#result")
+    .removeClass("d-none")
+    .addClass("flash-error")
+    .text(error.message);
+}
+
+function setupEventHandlers() {
+  // タブ切り替えの処理
+  $(".tabnav-tab").click(function () {
+    const target = $(this).attr("href").substring(1);
+    $(".tabnav-tab").removeClass("selected");
+    $(this).addClass("selected");
+
+    $(".tab-content").hide();
+    $(`#${target}`).show();
+  });
+
+  // リポジトリ選択時の処理
+  $("#repository").change(() => {
+    const selectedRepo = $("#repository").val();
+    chrome.storage.sync.set({ repository: selectedRepo });
+    github.repository = selectedRepo;
+  });
+
+  // Commit ボタンのクリック処理
+  $("#commit").click(() => handleCommitButtonClick());
+}
+
+function handleCommitButtonClick() {
+  if ($("#commit").hasClass("disabled")) return;
+
+  $("#commit").addClass("disabled");
+  $("#result").addClass("d-none");
+
+  const param = getParam();
+
+  if (!param.branch) {
+    handleError(new Error("ブランチが指定されていません。"));
+    return;
+  }
+
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (tabs.length === 0) {
+      handleError(new Error("アクティブなタブが見つかりません。"));
+      return;
+    }
+
+    const activeTab = tabs[0];
+    const tabId = activeTab.id;
+
+    executeScripts(tabId, param)
+      .then(() => {
+        $("#commit").removeClass("disabled");
+        $("#result").removeClass("d-none").text(`commit に成功しました。`);
+      })
+      .catch((err) => {
+        console.error(`commit に失敗しました:`, err);
+        $("#commit").removeClass("disabled");
+        $("#result")
+          .removeClass("d-none")
+          .addClass("flash-error")
+          .text(`commitに失敗しました: ${err.message}`);
+      });
+  });
+}
+
+function getParam() {
+  return {
+    branch: $("#branch").val(),
+    repository: $("#repository").val(),
+    message: $("#message").val() || "",
+  };
+}
+
+function executeScripts(tabId, param) {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId: tabId },
+        args: [param.branch, param.repository, param.message],
+        func: (projectId, repository, message) => {
+          window.projectId = projectId;
+          window.repository = repository;
+          window.message = message;
+        },
+      },
+      () => {
+        chrome.scripting.executeScript(
+          {
+            target: { tabId: tabId },
+            files: [
+              "lib/jszip.min.js",
+              "lib/FileSaver.min.js",
+              "src/scratch-sb3.js",
+            ],
+          },
+          (injectionResult) => {
+            if (chrome.runtime.lastError) {
+              return reject(chrome.runtime.lastError);
+            }
+
+            console.log(
+              "Content script executed successfully",
+              injectionResult
+            );
+            resolve();
+          }
+        );
+      }
+    );
+  });
+}
+
+/*
 $(() => {
   initContext()
     .then(setAllRepositories)
@@ -82,11 +328,7 @@ $(() => {
         }
       });
 
-      $("select#repository").change(() => {
-        const repoName = $("#repository").val();
-        chrome.storage.sync.set({ repository: repoName });
-        github.repo = repoName;
-      });
+     
 
       $("#commit").removeClass("disabled");
     })
@@ -96,122 +338,7 @@ $(() => {
     });
 });
 
-function initContext() {
-  context = {};
-  return new Promise((resolve, reject) => {
-    var items = ["token", "user", "baseUrl", "repository"];
-    chrome.storage.sync.get(items, (item) => {
-      if (!item.token) {
-        reject(new Error("need login"));
-      }
-      github = new GitHubAPI(
-        item.baseUrl,
-        item.user,
-        item.repository,
-        item.token
-      );
-      resolve();
-    });
-  });
-}
 
-function setAllRepositories() {
-  return checkGitHubAPI()
-    .then(getAllRepositories)
-    .then((repos) => {
-      return new Promise((resolve) => {
-        $(".repo-menu").empty();
-        repos.forEach((repo) => {
-          let content = `<option data='${repo.name}'>${repo.name}</option>`;
-          $(".repo-menu").append(content);
-        });
-        resolve();
-      });
-    });
-}
-
-function getProjectId() {
-  return new Promise((resolve) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs.length > 0) {
-        const url = tabs[0].url;
-        const projectId = url.split("/").filter(Boolean).pop();
-
-        $("#branch").val(projectId);
-      }
-    });
-
-    //TDOO: 別メソッドにする
-    chrome.storage.sync.get(["repository"], (item) => {
-      $("#repository").val(item.repository ? item.repository : "");
-      resolve();
-    });
-  });
-}
-
-function setAllCommits() {
-  return checkGitHubAPI()
-    .then(getAllCommits)
-    .then((commits) => {
-      return new Promise((resolve) => {
-        commits.forEach((commit) => {
-          const date = new Date(commit.commit.author.date).toLocaleString();
-          const message = commit.commit.message;
-
-          // リストアイテムを作成
-          const li = $("<li></li>").addClass("Box-row");
-
-          const downloadButton = $("<button></button>")
-            .addClass("btn btn-secondary btn-sm")
-            .append(
-              $("<img>")
-                .attr("src", "image/download.svg")
-                .attr("alt", "Download")
-                .addClass("icon")
-            );
-
-          const dateSpan = $("<span></span>")
-            .addClass("commit-date")
-            .text(date);
-
-          const messageSpan = $("<span></span>")
-            .addClass("commit-message")
-            .text(message);
-
-          li.append(dateSpan);
-          li.append(downloadButton);
-
-          li.append("<br>");
-          li.append(messageSpan);
-
-          // リストに追加
-          $("#message-list ul").append(li);
-        });
-        resolve();
-      });
-    });
-}
-
-function checkGitHubAPI(data = {}) {
-  return new Promise(function (resolve, reject) {
-    if (github === undefined) {
-      reject("GitHubAPI object is undefined.");
-    } else {
-      resolve(data);
-    }
-  });
-}
-
-function getParam() {
-  const repository = $("#repo").val();
-  const branch = $("#branch").val();
-  const message = $("#message").val();
-  return {
-    repository,
-    branch,
-    message,
-  };
-}
 
 function pushToGithub(param) {
   const repository = param.repository;
@@ -301,66 +428,6 @@ function initUserInfo() {
     });
 }
 
-function getAllRepositories() {
-  var allRepos = [];
-  var loop = function (page, resolve, reject) {
-    $.ajax({
-      url:
-        `${github.baseUrl}/user/repos` +
-        `?affiliation=owner&per_page=100&page=${page}`,
-      headers: { Authorization: `token ${github.token}` },
-    })
-      .done((repos) => {
-        repos = Object.keys(repos).map((key) => repos[key]);
-        if (repos.length === 0) {
-          resolve(allRepos);
-        } else {
-          allRepos = allRepos.concat(repos);
-          loop(page + 1, resolve, reject);
-        }
-      })
-      .fail((err) => reject(err));
-  };
-  return new Promise((resolve, reject) => loop(1, resolve, reject));
-}
-
-async function getAllCommits() {
-  var allCommits = [];
-  var repo = $("#repository").val();
-  var branch = $("#branch").val();
-
-  const data = await new Promise((resolve, reject) => {
-    chrome.storage.sync.get(["user"], (data) => {
-      if (chrome.runtime.lastError) {
-        reject(chrome.runtime.lastError);
-      } else {
-        resolve(data);
-      }
-    });
-  });
-  var user = data.user;
-
-  var loop = function (page, resolve, reject) {
-    $.ajax({
-      url:
-        `${github.baseUrl}/repos/${user}/${repo}/commits` +
-        `?sha=${branch}&per_page=100&page=${page}`,
-      headers: { Authorization: `token ${github.token}` },
-    })
-      .done((commits) => {
-        commits = Object.keys(commits).map((key) => commits[key]);
-        if (commits.length === 0) {
-          resolve(allCommits);
-        } else {
-          allCommits = allCommits.concat(commits);
-          loop(page + 1, resolve, reject);
-        }
-      })
-      .fail((err) => reject(err));
-  };
-  return new Promise((resolve, reject) => loop(1, resolve, reject));
-}
-
 function existContents(filepath, pTree) {
   var loop = function (filepaths, index, pTree, resolve) {
     var path = filepaths[index];
@@ -405,21 +472,5 @@ function existContents(filepath, pTree) {
   });
 }
 
-$(document).ready(function () {
-  // タブ切り替えの処理
-  $(".tabnav-tab").click(function () {
-    var target = $(this).attr("href").substring(1);
-    $(".tabnav-tab").removeClass("selected");
-    $(this).addClass("selected");
 
-    if (target === "history") {
-      $("#commit").hide();
-    }
-
-    if (target === "commit") {
-      $("#history").hide();
-    }
-
-    $("#" + target).show();
-  });
-});
+*/
