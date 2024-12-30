@@ -154,17 +154,33 @@ function setAllCommits() {
     .then(getAllCommits)
     .then((commits) => {
       return new Promise((resolve) => {
-        //$(".list-style-none").empty();
         commits.forEach((commit) => {
-          console.log(
-            `Date:   ${new Date(commit.commit.author.date).toLocaleString()}`
-          );
-          console.log(`\n    ${commit.commit.message}\n`);
+          const date = new Date(commit.commit.author.date).toLocaleString();
+          const message = commit.commit.message;
 
-          const li = $("<li></li>")
-            .addClass("Box-row")
-            .text(commit.commit.message);
-          $("#history #message-list ul").append(li);
+          // リストアイテムを作成
+          const li = $("<li></li>").addClass("Box-row");
+
+          const downloadButton = $("<button></button>")
+            .addClass("btn btn-secondary btn-sm")
+            .html('<i class="fas fa-download"></i>');
+
+          const dateSpan = $("<span></span>")
+            .addClass("commit-date")
+            .text(date);
+
+          const messageSpan = $("<span></span>")
+            .addClass("commit-message")
+            .text(message);
+
+          li.append(dateSpan);
+          li.append(downloadButton);
+
+          li.append("<br>");
+          li.append(messageSpan);
+
+          // リストに追加
+          $("#message-list ul").append(li);
         });
         resolve();
       });
@@ -306,6 +322,7 @@ function getAllRepositories() {
 async function getAllCommits() {
   var allCommits = [];
   var repo = $("#repository").val();
+  var branch = $("#branch").val();
 
   const data = await new Promise((resolve, reject) => {
     chrome.storage.sync.get(["user"], (data) => {
@@ -322,7 +339,7 @@ async function getAllCommits() {
     $.ajax({
       url:
         `${github.baseUrl}/repos/${user}/${repo}/commits` +
-        `?&per_page=100&page=${page}`,
+        `?sha=${branch}&per_page=100&page=${page}`,
       headers: { Authorization: `token ${github.token}` },
     })
       .done((commits) => {
