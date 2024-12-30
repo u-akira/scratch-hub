@@ -154,11 +154,17 @@ function setAllCommits() {
     .then(getAllCommits)
     .then((commits) => {
       return new Promise((resolve) => {
+        //$(".list-style-none").empty();
         commits.forEach((commit) => {
           console.log(
             `Date:   ${new Date(commit.commit.author.date).toLocaleString()}`
           );
           console.log(`\n    ${commit.commit.message}\n`);
+
+          const li = $("<li></li>")
+            .addClass("Box-row")
+            .text(commit.commit.message);
+          $("#history #message-list ul").append(li);
         });
         resolve();
       });
@@ -378,19 +384,20 @@ function existContents(filepath, pTree) {
 }
 
 $(document).ready(function () {
-  const tabs = $(".tabnav-tab");
-  const contents = $("div[id]");
-
-  tabs.on("click", function (e) {
-    e.preventDefault();
-
-    tabs.removeClass("selected");
-
-    contents.hide();
-
+  // タブ切り替えの処理
+  $(".tabnav-tab").click(function () {
+    var target = $(this).attr("href").substring(1);
+    $(".tabnav-tab").removeClass("selected");
     $(this).addClass("selected");
 
-    const target = $($(this).attr("href"));
-    target.show();
+    if (target === "history") {
+      $("#commit").hide();
+    }
+
+    if (target === "commit") {
+      $("#history").hide();
+    }
+
+    $("#" + target).show();
   });
 });

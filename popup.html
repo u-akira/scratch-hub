@@ -20,12 +20,12 @@
     <div class="tabnav">
       <nav class="tabnav-tabs">
         <a href="#commit" class="tabnav-tab selected">保存</a>
-        <a href="#logs" class="tabnav-tab">変更履歴</a>
+        <a href="#history" class="tabnav-tab">変更履歴</a>
       </nav>
     </div>
 
     <div id="commit" style="padding: 16px;">
-      
+      <h5 class="mb-3">Scratchプロジェクトの保存</h5>
       <form>
         <dl class="form-group">
           <dt><label>リポジトリ</label></dt>
@@ -49,9 +49,22 @@
       </form>
       <div id="result" class="flash d-none m-3"></div>
     </div>
-    <div id="logs" style="padding: 16px; display: none;">
-      <h1>Profile</h1>
-      <p>Profile page content goes here.</p>
+
+    <div id="history" style="padding: 16px; display: none;">
+      <h5 class="mb-3">保存履歴</h5>
+      <div id="message-list" class="Box p-3 mb-3">
+        <ul class="list-style-none">
+        </ul>
+      </div>
+    
+    
+    <!--
+    <nav aria-label="Pagination" class="paginate-container">
+      <button id="prev-btn" class="btn" disabled>Previous</button>
+      <button id="next-btn" class="btn">Next</button>
+    </nav>
+    -->
+  </div>
     </div>
   </div>
 </body>
