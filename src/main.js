@@ -120,7 +120,6 @@ function initPopup() {
       if (tabs.length > 0) {
         const url = tabs[0].url;
         const projectId = url.split("/").filter(Boolean).pop();
-        //console.log("取得したID:", projectId);
 
         $("#branch").val(projectId);
       }
@@ -330,3 +329,21 @@ function existContents(filepath, pTree) {
     loop(filepath.split("/"), 0, pTree, resolve);
   });
 }
+
+$(document).ready(function () {
+  const tabs = $(".tabnav-tab");
+  const contents = $("div[id]");
+
+  tabs.on("click", function (e) {
+    e.preventDefault();
+
+    tabs.removeClass("selected");
+
+    contents.hide();
+
+    $(this).addClass("selected");
+
+    const target = $($(this).attr("href"));
+    target.show();
+  });
+});

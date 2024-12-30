@@ -7,38 +7,52 @@
   <script src="lib/jquery.min.js" type="text/javascript" charset="utf-8"></script>
   <script src="lib/jszip.min.js"></script>
   <script src="lib/FileSaver.min.js"></script>
-  <!-- <script src="lib/base64.min.js" type="text/javascript" charset="utf-8"></script>-->
   <script src="src/github-api.js" type="text/javascript" charset="utf-8"></script>
   <script src="src/main.js" type="text/javascript" charset="utf-8"></script>
+  <style>
+    body {
+      width: 300px; 
+    }
+  </style>
 </head>
-
 <body>
   <div class="continer scratch-hub-page p-3">
-    <div class="blankslate">
-      <h5>ScratchのプロジェクトをGithubに保存します</h5>
+    <div class="tabnav">
+      <nav class="tabnav-tabs">
+        <a href="#commit" class="tabnav-tab selected">保存</a>
+        <a href="#logs" class="tabnav-tab">変更履歴</a>
+      </nav>
     </div>
-    <form>
-      <dl class="form-group">
-        <dt><label>リポジトリ</label></dt>
-        <dd>
-          <select id="repo" class="form-select select-sm repo-menu"></select>
-        </dd>
-      </dl>
-      <dl class="form-group">
-        <dt><label>ブランチ</label></dt>
-        <dd>
-          <input type="text" id="branch" readonly>
-        </dd>
-      </dl>
-      <dl class="form-group">
-        <dt><label>コメント</label></dt>
-        <dd>
-          <input id="message" class="form-control input-sm" type="text" placeholder="コメントを入力してください..." />
-        </dd>
-      </dl>
-      <button id="commit" class="btn btn-primary disabled" type="button">githubに保存</button>
-    </form>
-    <div id="result" class="flash d-none m-3"></div>
+
+    <div id="commit" style="padding: 16px;">
+      
+      <form>
+        <dl class="form-group">
+          <dt><label>リポジトリ</label></dt>
+          <dd>
+            <select id="repo" class="form-select select-sm repo-menu"></select>
+          </dd>
+        </dl>
+        <dl class="form-group">
+          <dt><label>ブランチ</label></dt>
+          <dd>
+            <input type="text" id="branch" readonly>
+          </dd>
+        </dl>
+        <dl class="form-group">
+          <dt><label>コメント</label></dt>
+          <dd>
+            <input id="message" class="form-control input-sm" type="text" placeholder="コメントを入力してください..." />
+          </dd>
+        </dl>
+        <button id="commit" class="btn btn-primary disabled" type="button">githubに保存</button>
+      </form>
+      <div id="result" class="flash d-none m-3"></div>
+    </div>
+    <div id="logs" style="padding: 16px; display: none;">
+      <h1>Profile</h1>
+      <p>Profile page content goes here.</p>
+    </div>
   </div>
 </body>
 
