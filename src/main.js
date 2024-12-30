@@ -163,7 +163,12 @@ function setAllCommits() {
 
           const downloadButton = $("<button></button>")
             .addClass("btn btn-secondary btn-sm")
-            .html('<i class="fas fa-download"></i>');
+            .append(
+              $("<img>")
+                .attr("src", "image/download.svg")
+                .attr("alt", "Download")
+                .addClass("icon")
+            );
 
           const dateSpan = $("<span></span>")
             .addClass("commit-date")

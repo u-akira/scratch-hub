@@ -1,20 +1,24 @@
 body {
     width: 300px; 
   }
-/* commit-dateを小さくして、改行を調整 */
+
 .commit-date {
-    font-size: 0.7rem; /* メッセージより小さく */
-    color: #888; /* 日付の色をグレーに */
-    margin-bottom: 1px; /* 少し間隔を開ける */
+    font-size: 0.7rem; 
+    color: #888; 
+    margin-bottom: 1px; 
 }
   
-/* commit-messageを調整 */
 .commit-message {
-    font-size: 1rem; /* 通常のサイズ */
-    margin-bottom: 5px; /* メッセージと次の項目との間隔を確保 */
+    font-size: 1rem; 
+    margin-bottom: 5px; 
 }
   
-/* ダウンロードボタン */
 button {
-    margin-left: 10px; /* ボタンと日付の間に間隔を追加 */
+    margin-left: 10px; 
 }
+
+.icon {
+    width: 12px;
+    height: 12px;
+    vertical-align: middle;
+  }
