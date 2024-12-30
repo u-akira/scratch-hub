@@ -5,8 +5,9 @@ let context = {};
 
 $(() => {
   initContext()
-    .then(updateRepo)
-    .then(initPopup)
+    .then(setAllRepositories)
+    .then(getProjectId)
+    .then(setAllCommits)
     .then(() => {
       if (github.repository === undefined) {
         return;
@@ -81,8 +82,8 @@ $(() => {
         }
       });
 
-      $("select#repo").change(() => {
-        const repoName = $("#repo").val();
+      $("select#repository").change(() => {
+        const repoName = $("#repository").val();
         chrome.storage.sync.set({ repository: repoName });
         github.repo = repoName;
       });
@@ -114,37 +115,9 @@ function initContext() {
   });
 }
 
-function initPopup() {
-  return new Promise((resolve) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs.length > 0) {
-        const url = tabs[0].url;
-        const projectId = url.split("/").filter(Boolean).pop();
-
-        $("#branch").val(projectId);
-      }
-    });
-
-    chrome.storage.sync.get(["repository"], (item) => {
-      $("#repo").val(item.repository ? item.repository : "");
-      resolve();
-    });
-  });
-}
-
-function checkGitHubAPI(data = {}) {
-  return new Promise(function (resolve, reject) {
-    if (github === undefined) {
-      reject("GitHubAPI object is undefined.");
-    } else {
-      resolve(data);
-    }
-  });
-}
-
-function updateRepo() {
+function setAllRepositories() {
   return checkGitHubAPI()
-    .then(getAllRepository)
+    .then(getAllRepositories)
     .then((repos) => {
       return new Promise((resolve) => {
         $(".repo-menu").empty();
@@ -155,6 +128,51 @@ function updateRepo() {
         resolve();
       });
     });
+}
+
+function getProjectId() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0) {
+        const url = tabs[0].url;
+        const projectId = url.split("/").filter(Boolean).pop();
+
+        $("#branch").val(projectId);
+      }
+    });
+
+    //TDOO: 別メソッドにする
+    chrome.storage.sync.get(["repository"], (item) => {
+      $("#repository").val(item.repository ? item.repository : "");
+      resolve();
+    });
+  });
+}
+
+function setAllCommits() {
+  return checkGitHubAPI()
+    .then(getAllCommits)
+    .then((commits) => {
+      return new Promise((resolve) => {
+        commits.forEach((commit) => {
+          console.log(
+            `Date:   ${new Date(commit.commit.author.date).toLocaleString()}`
+          );
+          console.log(`\n    ${commit.commit.message}\n`);
+        });
+        resolve();
+      });
+    });
+}
+
+function checkGitHubAPI(data = {}) {
+  return new Promise(function (resolve, reject) {
+    if (github === undefined) {
+      reject("GitHubAPI object is undefined.");
+    } else {
+      resolve(data);
+    }
+  });
 }
 
 function getParam() {
@@ -168,13 +186,6 @@ function getParam() {
   };
 }
 
-//----------------------------------------------------------
-// 1. tokenを取得する api.scratch.mit.edu/projects/${id}
-// 2. project.jsonをダウンロードする https://projects.scratch.mit.edu/${id}?token={$token}
-// 3. project.jsonを読み込み、assets情報をダウンロードする
-// 4. project_idフォルダ配下に保存
-// 5. project_idフォルダをgithubにcommit (push) する
-//----------------------------------------------------------
 function pushToGithub(param) {
   const repository = param.repository;
   const branch = param.branch;
@@ -263,7 +274,7 @@ function initUserInfo() {
     });
 }
 
-function getAllRepository() {
+function getAllRepositories() {
   var allRepos = [];
   var loop = function (page, resolve, reject) {
     $.ajax({
@@ -278,6 +289,42 @@ function getAllRepository() {
           resolve(allRepos);
         } else {
           allRepos = allRepos.concat(repos);
+          loop(page + 1, resolve, reject);
+        }
+      })
+      .fail((err) => reject(err));
+  };
+  return new Promise((resolve, reject) => loop(1, resolve, reject));
+}
+
+async function getAllCommits() {
+  var allCommits = [];
+  var repo = $("#repository").val();
+
+  const data = await new Promise((resolve, reject) => {
+    chrome.storage.sync.get(["user"], (data) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+      } else {
+        resolve(data);
+      }
+    });
+  });
+  var user = data.user;
+
+  var loop = function (page, resolve, reject) {
+    $.ajax({
+      url:
+        `${github.baseUrl}/repos/${user}/${repo}/commits` +
+        `?&per_page=100&page=${page}`,
+      headers: { Authorization: `token ${github.token}` },
+    })
+      .done((commits) => {
+        commits = Object.keys(commits).map((key) => commits[key]);
+        if (commits.length === 0) {
+          resolve(allCommits);
+        } else {
+          allCommits = allCommits.concat(commits);
           loop(page + 1, resolve, reject);
         }
       })
