@@ -79,7 +79,15 @@ function getProjectId() {
 function setAllCommits() {
   return fetchAllCommits().then((commits) => {
     $("#message-list ul").empty();
-    commits.forEach(renderCommit);
+
+    commits.forEach((commit) => {
+      if (!commit) {
+        console.warn("Skipped a commit due to missing data:", commit);
+        return;
+      }
+
+      renderCommit(commit);
+    });
   });
 }
 
@@ -91,12 +99,22 @@ function fetchAllCommits() {
   return chrome.storage.sync.get(["user"]).then(({ user }) => {
     const fetchPage = (page) =>
       $.ajax({
-        url: `${github.baseUrl}/repos/${user}/${repo}/commits?sha=${branch}&per_page=100&page=${page}`,
+        url: `${github.baseUrl}/repos/${user}/${repo}/commits?sha=${branch}&path=project.sb3&per_page=100&page=${page}`,
         headers: { Authorization: `token ${github.token}` },
-      }).then((commits) => {
-        allCommits.push(...commits);
-        return commits.length ? fetchPage(page + 1) : allCommits;
-      });
+      })
+        .then((commits) => {
+          allCommits.push(...commits);
+          return commits.length ? fetchPage(page + 1) : allCommits;
+        })
+        .catch((error) => {
+          if (error.status === 404) {
+            console.warn("No commits found for this branch and file.");
+            return [];
+          } else {
+            console.error("Error fetching commits:", error);
+            return [];
+          }
+        });
 
     return fetchPage(1);
   });
@@ -105,11 +123,10 @@ function fetchAllCommits() {
 function renderCommit(commit) {
   const date = new Date(commit.commit.author.date).toLocaleString();
   const message = commit.commit.message;
+  const sha = commit.sha;
 
-  const li = $("<li></li>")
-    .addClass("Box-row")
-    .attr("data-commit-sha", commit.sha);
-  const downloadButton = createDownloadButton();
+  const li = $("<li></li>").addClass("Box-row");
+  const downloadButton = createDownloadButton(sha);
   const dateSpan = $("<span></span>").addClass("commit-date").text(date);
   const messageSpan = $("<span></span>")
     .addClass("commit-message")
@@ -119,9 +136,10 @@ function renderCommit(commit) {
   $("#message-list ul").append(li);
 }
 
-function createDownloadButton() {
+function createDownloadButton(sha) {
   return $("<button></button>")
     .addClass("btn btn-secondary btn-sm download")
+    .attr("data-commit-sha", sha)
     .append(
       $("<img>")
         .attr("src", "image/download.svg")
@@ -165,7 +183,7 @@ function setupEventHandlers() {
   $("#commit").click(() => handleCommitButtonClick());
 }
 
-function handleCommitButtonClick() {
+async function handleCommitButtonClick() {
   if ($("#commit").hasClass("disabled")) return;
 
   $("#commit").addClass("disabled");
@@ -175,125 +193,174 @@ function handleCommitButtonClick() {
 
   if (!param.branch) {
     handleError(new Error("ブランチが指定されていません。"));
+    $("#commit").removeClass("disabled");
     return;
   }
 
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tabs.length === 0) {
       handleError(new Error("アクティブなタブが見つかりません。"));
+      $("#commit").removeClass("disabled");
       return;
     }
 
     const activeTab = tabs[0];
     const tabId = activeTab.id;
 
-    executeScripts(tabId, param)
-      .then(() => {
-        const getMessageFromContentScript = () => {
-          return new Promise((resolve, reject) => {
-            chrome.runtime.onMessage.addListener(function listener(
-              request,
-              sender
-            ) {
-              if (request.commit) {
-                chrome.runtime.onMessage.removeListener(listener); // リスナーを削除
-                resolve(request.commit);
-              }
-            });
+    await executeScripts(tabId, param);
 
-            setTimeout(() => {
-              reject(
-                new Error("コンテンツスクリプトからの応答がありませんでした")
-              );
-            }, 10000);
-          });
-        };
-        const getFileSha = async (apiUrl, headers) => {
-          const response = await fetch(apiUrl, {
-            method: "GET",
-            headers: headers,
-          });
+    const base64Content = await getMessageFromContentScript();
+    const headers = {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${github.token}`,
+      "Content-Type": "application/json",
+    };
 
-          if (response.ok) {
-            const data = await response.json();
-            return data.sha;
-          } else if (response.status === 404) {
-            return null;
-          } else {
-            throw new Error(`GitHub API GETエラー: ${response.status}`);
-          }
-        };
+    // ブランチの存在確認
+    const branchUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/branches/${param.branch}`;
+    const branchExists = await checkBranchExists(branchUrl, headers);
+    if (!branchExists) {
+      console.warn("Branch not found. Creating branch...");
+      await createBranch(param.branch);
+    }
 
-        const updateFileOnGitHub = async () => {
-          const filePath = "project.sb3";
-          const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/contents/${filePath}`;
+    // ファイルをGitHubに更新
+    await updateFileOnGitHub(param, base64Content, headers);
 
-          const headers = {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${github.token}`,
-            "Content-Type": "application/json",
-          };
+    $("#result").removeClass("d-none").text("commit に成功しました。");
+  } catch (err) {
+    console.error(`commit に失敗しました:`, err);
+    $("#result")
+      .removeClass("d-none")
+      .addClass("flash-error")
+      .text(`commitに失敗しました: ${err.message}`);
+  } finally {
+    $("#commit").removeClass("disabled");
+  }
+}
 
-          try {
-            const base64Content = await getMessageFromContentScript();
-            const sha = await getFileSha(
-              apiUrl + `?ref=${param.branch}`,
-              headers
-            );
+const checkBranchExists = async (branchUrl, headers) => {
+  try {
+    const response = await fetch(branchUrl, { method: "GET", headers });
+    return response.ok;
+  } catch (error) {
+    console.error("ブランチ確認中のエラー:", error);
+    throw new Error("ブランチ確認中にエラーが発生しました");
+  }
+};
 
-            const requestData = {
-              message: param.message,
-              content: base64Content,
-              branch: param.branch,
-            };
+const updateFileOnGitHub = async (param, base64Content, headers) => {
+  const filePath = "project.sb3";
+  const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/contents/${filePath}`;
 
-            if (sha) {
-              requestData.sha = sha;
-            }
+  try {
+    const sha = await getFileSha(apiUrl + `?ref=${param.branch}`, headers);
 
-            const response = await fetch(apiUrl, {
-              method: "PUT",
-              headers: headers,
-              body: JSON.stringify(requestData),
-            });
+    const requestData = {
+      message: param.message,
+      content: base64Content,
+      branch: param.branch,
+    };
 
-            if (!response.ok) {
-              const errorData = await response.json();
-              throw new Error(
-                `GitHub APIエラー: ${response.status}, ${JSON.stringify(
-                  errorData
-                )}`
-              );
-            }
+    if (sha) {
+      requestData.sha = sha;
+    }
 
-            const data = await response.json();
-            console.log("GitHub APIレスポンス:", data);
-            chrome.runtime.sendMessage({
-              log: "ファイルをGitHubにコミットしました:",
-              response: data,
-            });
-          } catch (error) {
-            console.error("GitHub APIエラー:", error);
-            chrome.runtime.sendMessage({
-              error: `GitHubへのコミットでエラーが発生しました: ${error.message}`,
-            });
-          }
-        };
+    const response = await fetch(apiUrl, {
+      method: "PUT",
+      headers: headers,
+      body: JSON.stringify(requestData),
+    });
 
-        updateFileOnGitHub();
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(
+        `GitHub APIエラー: ${response.status}, ${JSON.stringify(errorData)}`
+      );
+    }
 
-        $("#commit").removeClass("disabled");
-        $("#result").removeClass("d-none").text(`commit に成功しました。`);
-      })
-      .catch((err) => {
-        console.error(`commit に失敗しました:`, err);
-        $("#commit").removeClass("disabled");
-        $("#result")
-          .removeClass("d-none")
-          .addClass("flash-error")
-          .text(`commitに失敗しました: ${err.message}`);
-      });
+    const data = await response.json();
+    console.log("GitHub APIレスポンス:", data);
+  } catch (error) {
+    console.error("GitHub APIエラー:", error);
+    chrome.runtime.sendMessage({
+      error: `GitHubへのコミットでエラーが発生しました: ${error.message}`,
+    });
+    throw error;
+  }
+};
+
+const getFileSha = async (apiUrl, headers) => {
+  const response = await fetch(apiUrl, { method: "GET", headers });
+  if (response.ok) {
+    const data = await response.json();
+    return data.sha;
+  } else if (response.status === 404) {
+    return null;
+  } else {
+    throw new Error(`GitHub API GETエラー: ${response.status}`);
+  }
+};
+
+const getMessageFromContentScript = () => {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.onMessage.addListener(function listener(request, sender) {
+      if (request.commit) {
+        chrome.runtime.onMessage.removeListener(listener); // リスナーを削除
+        resolve(request.commit);
+      }
+    });
+
+    setTimeout(() => {
+      reject(new Error("コンテンツスクリプトからの応答がありませんでした"));
+    }, 10000);
   });
+};
+
+async function createBranch(branch) {
+  const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/git/refs`;
+  const headers = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${github.token}`,
+    "Content-Type": "application/json",
+  };
+
+  try {
+    // ベースブランチのSHAを取得
+    const baseBranchApiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/branches/main`;
+    const baseBranchResponse = await fetch(baseBranchApiUrl, { headers });
+
+    if (!baseBranchResponse.ok) {
+      throw new Error(
+        `Failed to fetch base branch main: ${baseBranchResponse.statusText}`
+      );
+    }
+
+    const baseBranchData = await baseBranchResponse.json();
+    const baseSha = baseBranchData.commit.sha;
+
+    // 新しいブランチを作成
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ref: `refs/heads/${branch}`,
+        sha: baseSha,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to create branch ${branch}: ${response.statusText}`
+      );
+    }
+
+    console.log(`Branch ${branch} created successfully.`);
+  } catch (error) {
+    console.error("Error creating branch:", error);
+    throw error;
+  }
 }
 
 function getParam() {
@@ -342,229 +409,75 @@ function executeScripts(tabId, param) {
   });
 }
 
-/*
-$(() => {
-  initContext()
-    .then(setAllRepositories)
-    .then(getProjectId)
-    .then(setAllCommits)
-    .then(() => {
-      if (github.repository === undefined) {
-        return;
-      }
-    })
-    .then(() => {
-      $("#commit").click(() => {
-        if (!$("#commit").hasClass("disabled")) {
-          $("#commit").addClass("disabled");
-          $("#result").addClass("d-none");
-
-          //getParam();
-          const projectId = $("#branch").val();
-          const repository = $("#repo").val();
-          const message = $("#message").val();
-
-          if (!projectId) {
-            console.error("プロジェクトIDが未指定です。");
-            $("#commit").removeClass("disabled");
-            return;
-          }
-
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs.length === 0) {
-              console.error("タブが取得できませんでした");
-              $("#commit").removeClass("disabled");
-              return;
-            }
-            const activeTab = tabs[0];
-            const tabId = activeTab.id;
-
-            chrome.scripting.executeScript(
-              {
-                target: { tabId: tabId },
-                args: [projectId, repository, message],
-                func: (projectId, repository, message) => {
-                  console.log("取得したID:", projectId);
-                  window.projectId = projectId;
-                  window.repository = repository;
-                  window.message = message;
-                },
-              },
-              () => {
-                chrome.scripting.executeScript(
-                  {
-                    target: { tabId: tabId },
-                    files: [
-                      "lib/jszip.min.js",
-                      "lib/FileSaver.min.js",
-                      "src/scratch-sb3.js",
-                    ],
-                  },
-                  (injectionResult) => {
-                    if (chrome.runtime.lastError) {
-                      console.error(
-                        "スクリプトの実行エラー:",
-                        chrome.runtime.lastError
-                      );
-                    } else {
-                      console.log(
-                        "Content script executed successfully",
-                        injectionResult
-                      );
-                    }
-
-                    $("#commit").removeClass("disabled");
-                  }
-                );
-              }
-            );
-          });
-        }
-      });
-
-     
-
-      $("#commit").removeClass("disabled");
-    })
-    .catch((err) => {
-      $("#commit").removeClass("disabled");
-      $("#result").removeClass("d-none").addClass("flash-error").text(err);
-    });
-});
-
-
-
-function pushToGithub(param) {
-  const repository = param.repository;
-  const branch = param.branch;
-  const message = param.message;
-  initContext()
-    .then(initUserInfo)
-    .then(checkGitHubAPI)
-    .then(
-      () =>
-        new Promise((resolve) => {
-          github.repo = repository;
-          resolve();
-        })
-    )
-    .then(github.get(`repos/${github.user}/${github.repo}/branches/${branch}`))
-    .then((branch) => {
-      if (!(context.name && context.email)) {
-        context.name = branch.commit.commit.author.name;
-        context.email = branch.commit.commit.author.email;
-      }
-      var sha = branch.commit.commit.tree.sha;
-      return github.get(
-        `repos/${github.user}/${github.repo}/git/trees/${sha}`
-      )();
-    })
-    .then((tree) => existContents(filepath, tree.tree, repository))
-    .then((exist) => {
-      if (exist.ok) {
-        return github.get(
-          `repos/${github.user}/${github.repo}/git/blobs/${exist.sha}`
-        )();
-      } else {
-        return new Promise((resolve) => {
-          resolve({});
-        });
-      }
-    })
-    .then((blob) => {
-      var data = {};
-      var content = `- ${url} : ${message}`;
-      if (blob.content) {
-        content = Base64.decode(blob.content) + `\n${content}`;
-        data.sha = blob.sha;
-      }
-      $.extend(data, {
-        message: message ? message : "Bookmark!",
-        committer: {
-          name: context.name,
-          email: context.email,
-        },
-        content: Base64.encode(content),
-        branch: branch,
-      });
-      return github.put(
-        `repos/${github.user}/${github.repo}/contents/${filepath}`,
-        data
-      )();
-    })
-    .then(() => {
-      $("#commit").removeClass("disabled");
-      $("#result")
-        .removeClass("d-none")
-        .removeClass("flash-error")
-        .text("Succsess!");
-      chrome.storage.sync.set({
-        repository: repository,
-        branch: branch,
-        filepath: filepath,
-      });
-    })
-    .catch((err) => {
-      $("#commit").removeClass("disabled");
-      $("#result").removeClass("d-none").addClass("flash-error").text(err);
-    });
-}
-
-function initUserInfo() {
-  return checkGitHubAPI()
-    .then(github.get(`users/${github.user}`))
-    .then((user) => {
-      return new Promise((resolve) => {
-        context.name = user.name;
-        context.email = user.email;
-        resolve();
-      });
-    });
-}
-
-function existContents(filepath, pTree) {
-  var loop = function (filepaths, index, pTree, resolve) {
-    var path = filepaths[index];
-    var result = {};
-    for (var i in pTree) {
-      if (pTree[i].path.toString() === path.toString()) {
-        var length = filepaths.length;
-        if (index === length - 1 && pTree[i].type.toString() === "blob") {
-          result = pTree[i];
-          break;
-        } else if (pTree[i].type.toString() === "tree") {
-          result = pTree[i];
-          break;
-        }
-      }
-    }
-    switch (result.type) {
-      case "blob":
-        resolve({ ok: true, sha: pTree[i].sha });
-        break;
-      case "tree":
-        $.ajax({
-          url:
-            `${github.baseUrl}/repos/` +
-            `${github.user}/${github.repo}/git/trees/${pTree[i].sha}`,
-          headers: { Authorization: `token ${github.token}` },
-        })
-          .done((tree) => {
-            loop(filepaths, index + 1, tree.tree, resolve);
-          })
-          .fail(() => {
-            resolve({ ok: false });
-          });
-        break;
-      default:
-        resolve({ ok: false });
-    }
-  };
-
-  return new Promise((resolve) => {
-    loop(filepath.split("/"), 0, pTree, resolve);
+$(document).ready(function () {
+  // 動的に追加された .download ボタンにも対応
+  $(document).on("click", ".download", async function () {
+    await handleDownloadButtonClick.call(this);
   });
-}
 
+  async function handleDownloadButtonClick() {
+    console.log("Download button clicked.");
 
-*/
+    const getFile = async (apiUrl, headers) => {
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        headers: headers,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data;
+      } else if (response.status === 404) {
+        console.error("File not found at the given SHA.");
+        return null;
+      } else {
+        throw new Error(`GitHub API GETエラー: ${response.status}`);
+      }
+    };
+
+    const sha = $(this).data("commit-sha");
+
+    const filePath = "project.sb3";
+    const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/contents/${filePath}?ref=${sha}`;
+
+    const headers = {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${github.token}`,
+      "Content-Type": "application/json",
+    };
+
+    try {
+      // GitHubからファイルを取得する
+      const shaResult = await getFile(apiUrl, headers);
+
+      if (shaResult) {
+        const decodedContent = atob(shaResult.content); // Base64デコード
+
+        console.log("Decoded Content:", decodedContent);
+
+        // デコードされたデータを Blob として処理する場合
+        const byteArray = new Uint8Array(decodedContent.length);
+        for (let i = 0; i < decodedContent.length; i++) {
+          byteArray[i] = decodedContent.charCodeAt(i);
+        }
+
+        // Blobを生成
+        const blob = new Blob([byteArray], {
+          type: "application/octet-stream",
+        });
+
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = filePath;
+        a.click();
+
+        URL.revokeObjectURL(downloadUrl);
+      } else {
+        console.error("File is not available.");
+      }
+    } catch (error) {
+      console.error("Error occurred:", error);
+    }
+  }
+});
