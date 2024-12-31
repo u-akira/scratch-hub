@@ -106,7 +106,9 @@ function renderCommit(commit) {
   const date = new Date(commit.commit.author.date).toLocaleString();
   const message = commit.commit.message;
 
-  const li = $("<li></li>").addClass("Box-row");
+  const li = $("<li></li>")
+    .addClass("Box-row")
+    .attr("data-commit-sha", commit.sha);
   const downloadButton = createDownloadButton();
   const dateSpan = $("<span></span>").addClass("commit-date").text(date);
   const messageSpan = $("<span></span>")
@@ -187,6 +189,99 @@ function handleCommitButtonClick() {
 
     executeScripts(tabId, param)
       .then(() => {
+        const getMessageFromContentScript = () => {
+          return new Promise((resolve, reject) => {
+            chrome.runtime.onMessage.addListener(function listener(
+              request,
+              sender
+            ) {
+              if (request.commit) {
+                chrome.runtime.onMessage.removeListener(listener); // リスナーを削除
+                resolve(request.commit);
+              }
+            });
+
+            setTimeout(() => {
+              reject(
+                new Error("コンテンツスクリプトからの応答がありませんでした")
+              );
+            }, 10000);
+          });
+        };
+        const getFileSha = async (apiUrl, headers) => {
+          const response = await fetch(apiUrl, {
+            method: "GET",
+            headers: headers,
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            return data.sha;
+          } else if (response.status === 404) {
+            return null;
+          } else {
+            throw new Error(`GitHub API GETエラー: ${response.status}`);
+          }
+        };
+
+        const updateFileOnGitHub = async () => {
+          const filePath = "project.sb3";
+          const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/contents/${filePath}`;
+
+          const headers = {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${github.token}`,
+            "Content-Type": "application/json",
+          };
+
+          try {
+            const base64Content = await getMessageFromContentScript();
+            const sha = await getFileSha(
+              apiUrl + `?ref=${param.branch}`,
+              headers
+            );
+
+            const requestData = {
+              message: param.message,
+              content: base64Content,
+              branch: param.branch,
+            };
+
+            if (sha) {
+              requestData.sha = sha;
+            }
+
+            const response = await fetch(apiUrl, {
+              method: "PUT",
+              headers: headers,
+              body: JSON.stringify(requestData),
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(
+                `GitHub APIエラー: ${response.status}, ${JSON.stringify(
+                  errorData
+                )}`
+              );
+            }
+
+            const data = await response.json();
+            console.log("GitHub APIレスポンス:", data);
+            chrome.runtime.sendMessage({
+              log: "ファイルをGitHubにコミットしました:",
+              response: data,
+            });
+          } catch (error) {
+            console.error("GitHub APIエラー:", error);
+            chrome.runtime.sendMessage({
+              error: `GitHubへのコミットでエラーが発生しました: ${error.message}`,
+            });
+          }
+        };
+
+        updateFileOnGitHub();
+
         $("#commit").removeClass("disabled");
         $("#result").removeClass("d-none").text(`commit に成功しました。`);
       })
@@ -214,11 +309,10 @@ function executeScripts(tabId, param) {
     chrome.scripting.executeScript(
       {
         target: { tabId: tabId },
-        args: [param.branch, param.repository, param.message],
-        func: (projectId, repository, message) => {
-          window.projectId = projectId;
-          window.repository = repository;
-          window.message = message;
+        args: [param, github],
+        func: (param, github) => {
+          window.param = param;
+          window.github = github;
         },
       },
       () => {

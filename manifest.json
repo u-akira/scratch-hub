@@ -14,8 +14,7 @@
   "content_scripts": [
     {
       "matches": ["https://api.scratch.mit.edu/projects/*"], 
-      "js": ["lib/jszip.min.js","lib/FileSaver.min.js","src/scratch-sb3.js"],
-      "resources": ["image/*"]
+      "js": ["lib/jszip.min.js","lib/base64.min.js","src/scratch-sb3.js"]
     }
   ],
   "host_permissions": [
