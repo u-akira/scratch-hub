@@ -65,7 +65,7 @@ function getProjectId() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs.length > 0) {
         const projectId = tabs[0].url.split("/").filter(Boolean).pop();
-        $("#branch").val(projectId);
+        $("#project-id").attr("data-project-id", projectId);
       }
     });
 
@@ -93,13 +93,16 @@ function setAllCommits() {
 
 function fetchAllCommits() {
   const allCommits = [];
-  const repo = $("#repository").val();
-  const branch = $("#branch").val();
+  const param = getParam();
 
   return chrome.storage.sync.get(["user"]).then(({ user }) => {
     const fetchPage = (page) =>
       $.ajax({
-        url: `${github.baseUrl}/repos/${user}/${repo}/commits?sha=${branch}&path=project.sb3&per_page=100&page=${page}`,
+        url: `${github.baseUrl}/repos/${user}/${
+          param.repository
+        }/commits?sha=main&path=${encodeURIComponent(
+          param.projectId + "/project.sb3"
+        )}&per_page=100&page=${page}`,
         headers: { Authorization: `token ${github.token}` },
       })
         .then((commits) => {
@@ -191,12 +194,6 @@ async function handleCommitButtonClick() {
 
   const param = getParam();
 
-  if (!param.branch) {
-    handleError(new Error("ブランチが指定されていません。"));
-    $("#commit").removeClass("disabled");
-    return;
-  }
-
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tabs.length === 0) {
@@ -210,6 +207,7 @@ async function handleCommitButtonClick() {
 
     await executeScripts(tabId, param);
 
+    /*
     const base64Content = await getMessageFromContentScript();
     const headers = {
       Accept: "application/vnd.github+json",
@@ -218,15 +216,16 @@ async function handleCommitButtonClick() {
     };
 
     // ブランチの存在確認
-    const branchUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/branches/${param.branch}`;
+    const branchUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/branches/main`;
     const branchExists = await checkBranchExists(branchUrl, headers);
     if (!branchExists) {
       console.warn("Branch not found. Creating branch...");
-      await createBranch(param.branch);
+      await createBranch(main);
     }
 
     // ファイルをGitHubに更新
     await updateFileOnGitHub(param, base64Content, headers);
+    */
 
     $("#result").removeClass("d-none").text("commit に成功しました。");
   } catch (err) {
@@ -240,6 +239,7 @@ async function handleCommitButtonClick() {
   }
 }
 
+/*
 const checkBranchExists = async (branchUrl, headers) => {
   try {
     const response = await fetch(branchUrl, { method: "GET", headers });
@@ -251,11 +251,11 @@ const checkBranchExists = async (branchUrl, headers) => {
 };
 
 const updateFileOnGitHub = async (param, base64Content, headers) => {
-  const filePath = "project.sb3";
+  const filePath = `${param.projectId}/project.sb3`;
   const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/contents/${filePath}`;
 
   try {
-    const sha = await getFileSha(apiUrl + `?ref=${param.branch}`, headers);
+    const sha = await getFileSha(apiUrl, headers);
 
     const requestData = {
       message: param.message,
@@ -362,10 +362,11 @@ async function createBranch(branch) {
     throw error;
   }
 }
+  */
 
 function getParam() {
   return {
-    branch: $("#branch").val(),
+    projectId: $("#project-id").data("project-id"),
     repository: $("#repository").val(),
     message: $("#message").val() || "",
   };
@@ -389,6 +390,7 @@ function executeScripts(tabId, param) {
             files: [
               "lib/jszip.min.js",
               "lib/FileSaver.min.js",
+              "lib/github-api.js",
               "src/scratch-sb3.js",
             ],
           },
@@ -412,12 +414,80 @@ function executeScripts(tabId, param) {
 $(document).ready(function () {
   // 動的に追加された .download ボタンにも対応
   $(document).on("click", ".download", async function () {
-    await handleDownloadButtonClick.call(this);
+    try {
+      console.log("Download button clicked.");
+      await handleDownloadButtonClick.call(this);
+    } catch (error) {
+      console.error("Error in handleDownloadButtonClick:", error);
+    }
   });
 
   async function handleDownloadButtonClick() {
-    console.log("Download button clicked.");
+    const tabs = await new Promise((resolve, reject) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (chrome.runtime.lastError) {
+          return reject(chrome.runtime.lastError);
+        }
+        resolve(tabs);
+      });
+    });
 
+    if (tabs.length === 0) {
+      console.error("アクティブなタブが見つかりません。");
+      return;
+    }
+
+    const activeTab = tabs[0];
+    const tabId = activeTab.id;
+    const sha = $(this).data("commit-sha");
+    const param = getParam();
+
+    // パラメータとGitHubデータを設定
+    chrome.scripting.executeScript(
+      {
+        target: { tabId: tabId },
+        args: [sha, param.projectId, github],
+        func: (sha, projectId, github) => {
+          window.sha = sha;
+          window.projectId = projectId;
+          window.github = github;
+        },
+      },
+      (result) => {
+        if (chrome.runtime.lastError) {
+          console.error("Failed to set parameters:", chrome.runtime.lastError);
+          return;
+        }
+
+        // sb3-download.js の実行
+        chrome.scripting.executeScript(
+          {
+            target: { tabId: tabId },
+            files: [
+              "lib/FileSaver.min.js",
+              "lib/jquery.min.js",
+              "lib/github-api.js",
+              "src/sb3-download.js",
+            ],
+          },
+          (injectionResult) => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "Script injection failed:",
+                chrome.runtime.lastError
+              );
+              return;
+            }
+
+            console.log("Scripts injected successfully", injectionResult);
+          }
+        );
+      }
+    );
+  }
+});
+
+/*
     const getFile = async (apiUrl, headers) => {
       const response = await fetch(apiUrl, {
         method: "GET",
@@ -436,8 +506,8 @@ $(document).ready(function () {
     };
 
     const sha = $(this).data("commit-sha");
-
-    const filePath = "project.sb3";
+    const param = getParam();
+    const filePath = encodeURIComponent(param.projectId + "/project.sb3");
     const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/contents/${filePath}?ref=${sha}`;
 
     const headers = {
@@ -453,8 +523,6 @@ $(document).ready(function () {
       if (shaResult) {
         const decodedContent = atob(shaResult.content); // Base64デコード
 
-        console.log("Decoded Content:", decodedContent);
-
         // デコードされたデータを Blob として処理する場合
         const byteArray = new Uint8Array(decodedContent.length);
         for (let i = 0; i < decodedContent.length; i++) {
@@ -469,7 +537,7 @@ $(document).ready(function () {
         const downloadUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = downloadUrl;
-        a.download = filePath;
+        a.download = `${title}.sb3`;
         a.click();
 
         URL.revokeObjectURL(downloadUrl);
@@ -480,4 +548,5 @@ $(document).ready(function () {
       console.error("Error occurred:", error);
     }
   }
-});
+    
+});*/

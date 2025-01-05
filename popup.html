@@ -7,7 +7,7 @@
   <link rel="stylesheet" type="text/css" href="css/main.css">
   <script src="lib/jquery.min.js" type="text/javascript" charset="utf-8"></script>
   <script src="lib/FileSaver.min.js"></script>
-  <script src="src/github-api.js" type="text/javascript" charset="utf-8"></script>
+  <script src="lib/github-api.js" type="text/javascript" charset="utf-8"></script>
   <script src="src/main.js" type="text/javascript" charset="utf-8"></script>
   <style>
     body {
@@ -32,13 +32,9 @@
           <dd>
             <select id="repository" class="form-select select-sm repo-menu"></select>
           </dd>
+          <dd id="project-id" data-project-id=""></dd>
         </dl>
-        <dl class="form-group">
-          <dt><label>ブランチ</label></dt>
-          <dd>
-            <input type="text" id="branch" readonly>
-          </dd>
-        </dl>
+       
         <dl class="form-group">
           <dt><label>コメント</label></dt>
           <dd>
