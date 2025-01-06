@@ -1,41 +1,34 @@
 (async () => {
-  console.log("aaa");
-  const sha = window.sha;
-  const projectId = window.projectId;
-  const github = window.github;
+  const sha = self.sha;
+  const projectId = self.projectId;
+  const github = new GitHubAPI(
+    self.github.baseUrl,
+    self.github.user,
+    self.github.repository,
+    self.github.token
+  );
 
-  console.log("SHA:", sha);
-  console.log("Project ID:", projectId);
-
-  const getFile = async (apiUrl, headers) => {
-    const response = await fetch(apiUrl, {
-      method: "GET",
-      headers: headers,
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      return data;
-    } else if (response.status === 404) {
-      console.error("File not found at the given SHA.");
-      return null;
-    } else {
-      throw new Error(`GitHub API GETエラー: ${response.status}`);
+  const getFile = async (endpoint) => {
+    try {
+      const data = await github.get(endpoint)();
+      return data; // ファイルのデータを返す
+    } catch (error) {
+      if (error.status === 404) {
+        console.error(`File not found at path: ${filePath}`);
+        return null; // ファイルが存在しない場合はnullを返す
+      } else {
+        console.error("GitHub API GETエラー:", error);
+        throw new Error(`GitHub API GETエラー: ${error.message}`);
+      }
     }
   };
 
   const filePath = encodeURIComponent(projectId + "/project.sb3");
-  const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/contents/${filePath}?ref=${sha}`;
-
-  const headers = {
-    Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${github.token}`,
-    "Content-Type": "application/json",
-  };
+  const endpoint = `repos/${github.user}/${github.repository}/contents/${filePath}?ref=${sha}`;
 
   try {
     // GitHubからファイルを取得する
-    const shaResult = await getFile(apiUrl, headers);
+    const shaResult = await getFile(endpoint);
 
     if (!shaResult || !shaResult.content) {
       console.error("File content is not available.");

@@ -6,7 +6,12 @@
 //----------------------------------------------------------
 
 const param = self.param;
-const github = self.github;
+const github = new GitHubAPI(
+  self.github.baseUrl,
+  self.github.user,
+  self.github.repository,
+  self.github.token
+);
 
 const projectMetaUrl = `https://api.scratch.mit.edu/projects/${param.projectId}`;
 
@@ -96,8 +101,6 @@ fetch(projectMetaUrl)
               reader.onload = function () {
                 const base64Content = reader.result.split(",")[1]; // Base64エンコードされたデータ部分を取得
 
-                //chrome.runtime.sendMessage({ commit: base64Content });
-
                 const headers = {
                   Accept: "application/vnd.github+json",
                   Authorization: `Bearer ${github.token}`,
@@ -105,8 +108,8 @@ fetch(projectMetaUrl)
                 };
 
                 // ブランチの存在確認
-                const branchUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/branches/main`;
-                const branchExists = checkBranchExists(branchUrl, headers);
+                //const branchUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/branches/main`;
+                const branchExists = checkBranchExists();
                 if (!branchExists) {
                   console.warn("Branch not found. Creating branch...");
                   createBranch(main);
@@ -115,79 +118,67 @@ fetch(projectMetaUrl)
                 updateFileOnGitHub(param, base64Content, headers);
               };
 
-              const checkBranchExists = async (branchUrl, headers) => {
+              const checkBranchExists = async () => {
                 try {
-                  const response = await fetch(branchUrl, {
-                    method: "GET",
-                    headers,
-                  });
-                  console.log("ブランチ確認中OK:");
-                  return response.ok;
+                  const endpoint = `repos/${github.user}/${github.repository}/branches/main`;
+                  const response = await github.get(endpoint)();
+                  console.log("ブランチ確認中OK:", response);
+                  return true;
                 } catch (error) {
-                  console.error("ブランチ確認中のエラー:", error);
-                  throw new Error("ブランチ確認中にエラーが発生しました");
+                  if (error.status === 404) {
+                    console.warn(`ブランチ main は存在しません。`);
+                    return false;
+                  } else {
+                    console.error("ブランチ確認中のエラー:", error);
+                    throw new Error("ブランチ確認中にエラーが発生しました");
+                  }
                 }
               };
 
-              const updateFileOnGitHub = async (
-                param,
-                base64Content,
-                headers
-              ) => {
+              const updateFileOnGitHub = async (param, base64Content) => {
                 const filePath = `${param.projectId}/project.sb3`;
-                const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/contents/${filePath}`;
+                const endpoint = `repos/${github.user}/${github.repository}/contents/${filePath}`;
 
                 try {
-                  const sha = await getFileSha(apiUrl, headers);
+                  // ファイルのSHAを取得
+                  const sha = await getFileSha(endpoint);
 
+                  // リクエストデータを構築
                   const requestData = {
                     message: param.message,
                     content: base64Content,
                     branch: param.branch,
                   };
-
                   if (sha) {
                     requestData.sha = sha;
                   }
 
-                  const response = await fetch(apiUrl, {
-                    method: "PUT",
-                    headers: headers,
-                    body: JSON.stringify(requestData),
-                  });
+                  // ファイル更新APIを呼び出し
+                  const response = await github.put(endpoint, requestData)();
+                  console.log("GitHub APIレスポンス:", response);
 
-                  if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(
-                      `GitHub APIエラー: ${response.status}, ${JSON.stringify(
-                        errorData
-                      )}`
-                    );
-                  }
-
-                  const data = await response.json();
-                  console.log("GitHub APIレスポンス:", data);
+                  return response; // 更新後のレスポンスを返す
                 } catch (error) {
                   console.error("GitHub APIエラー:", error);
                   chrome.runtime.sendMessage({
                     error: `GitHubへのコミットでエラーが発生しました: ${error.message}`,
                   });
-                  throw error;
+                  throw error; // エラーを再スロー
                 }
               };
 
-              const getFileSha = async (apiUrl, headers) => {
-                const response = await fetch(apiUrl, {
-                  method: "GET",
-                  headers,
-                });
-                if (response.ok) {
-                  const data = await response.json();
-                  return data.sha;
-                } else if (response.status === 404) {
-                  return null;
-                } else {
-                  throw new Error(`GitHub API GETエラー: ${response.status}`);
+              const getFileSha = async (endpoint) => {
+                try {
+                  const response = await github.get(endpoint)();
+                  return response.sha; // ファイルのSHAを返す
+                } catch (error) {
+                  if (error.status === 404) {
+                    console.warn(`ファイル "${filePath}" が存在しません。`);
+                    return null; // ファイルが存在しない場合はnullを返す
+                  } else {
+                    console.error("GitHub API GETエラー:", error);
+                    throw new Error(`GitHub API GETエラー: ${error.message}`);
+                  }
                 }
               };
 
@@ -217,6 +208,33 @@ fetch(projectMetaUrl)
     });
   });
 
+async function createBranch(branch) {
+  const baseBranch = "main";
+  const baseBranchEndpoint = `repos/${github.user}/${github.repository}/branches/${baseBranch}`;
+  const createBranchEndpoint = `repos/${github.user}/${github.repository}/git/refs`;
+
+  try {
+    // ベースブランチのSHAを取得
+    const baseBranchData = await github.get(baseBranchEndpoint)();
+    const baseSha = baseBranchData.commit.sha;
+
+    // 新しいブランチを作成
+    const requestData = {
+      ref: `refs/heads/${branch}`,
+      sha: baseSha,
+    };
+
+    const response = await github.post(createBranchEndpoint, requestData)();
+    console.log(`Branch ${branch} created successfully.`, response);
+
+    return response; // 作成したブランチのデータを返す
+  } catch (error) {
+    console.error(`Error creating branch "${branch}":`, error);
+    throw new Error(`Failed to create branch "${branch}": ${error.message}`);
+  }
+}
+
+/*
 async function createBranch(branch) {
   const apiUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/git/refs`;
   const headers = {
@@ -261,3 +279,4 @@ async function createBranch(branch) {
     throw error;
   }
 }
+  */
