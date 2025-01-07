@@ -204,6 +204,8 @@ function setupEventHandlers() {
 
   // Commit ボタンのクリック処理
   $("#commit").click(() => handleCommitButtonClick());
+
+  $("#get-commits").click(setAllCommits);
 }
 
 async function handleCommitButtonClick() {
