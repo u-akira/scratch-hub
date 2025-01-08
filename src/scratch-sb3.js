@@ -13,223 +13,151 @@ const github = new GitHubAPI(
   self.github.token
 );
 
-const projectMetaUrl = `https://api.scratch.mit.edu/projects/${param.projectId}`;
+generateZip(github, param);
 
-fetch(projectMetaUrl)
-  .then((response) => response.json())
-  .then((data) => {
-    token = data["project_token"];
+async function fetchProjectMeta(projectId) {
+  const url = `https://api.scratch.mit.edu/projects/${projectId}`;
+  const response = await fetch(url);
 
-    const projectUrl = `https://projects.scratch.mit.edu/${param.projectId}/?token=${token}`;
+  if (!response.ok) {
+    throw new Error(`Failed to fetch project metadata: ${response.status}`);
+  }
 
-    fetch(projectUrl)
-      .then((response) => response.json())
-      .then((projectData) => {
-        const projectJson = JSON.stringify(projectData);
+  return response.json();
+}
 
-        const zip = new JSZip(); // ZIPファイルを作成
+async function fetchProjectDetail(projectId, token) {
+  const url = `https://projects.scratch.mit.edu/${projectId}/?token=${token}`;
+  const response = await fetch(url);
 
-        // プロジェクトのJSONデータをZIPに追加
-        zip.file("project.json", projectJson);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch project detail: ${response.status}`);
+  }
 
-        // コスチュームとサウンドのアセットを取得するためのPromiseリスト
-        const fetchPromises = [];
+  return response.json();
+}
 
-        // ターゲット（ステージやスプライト）の情報を取得
-        projectData.targets.forEach((target) => {
-          // コスチューム情報を取得
-          target.costumes.forEach((costume) => {
-            const md5ext = costume.md5ext;
-            const assetUrl = `https://assets.scratch.mit.edu/internalapi/asset/${md5ext}/get/`;
+async function fetchAsset(assetUrl, name) {
+  const response = await fetch(assetUrl);
 
-            const costumePromise = fetch(assetUrl)
-              .then((response) => {
-                if (!response.ok) {
-                  throw new Error(
-                    `Failed to fetch ${costume.name} from ${assetUrl}`
-                  );
-                }
-                return response.blob();
-              })
-              .then((blob) => {
-                zip.file(md5ext, blob); // ZIPにアセットを追加
-              })
-              .catch((error) => {
-                chrome.runtime.sendMessage({
-                  log: `Error fetching costume asset ${costume.name}:`,
-                  error: error.message,
-                });
-              });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch asset ${name} from ${assetUrl}`);
+  }
 
-            fetchPromises.push(costumePromise);
-          });
+  return response.blob();
+}
 
-          // サウンド情報を取得
-          target.sounds.forEach((sound) => {
-            const md5ext = sound.md5ext;
-            const assetUrl = `https://assets.scratch.mit.edu/internalapi/asset/${md5ext}/get/`;
+async function processAssets(zip, targets) {
+  const fetchPromises = [];
 
-            const soundPromise = fetch(assetUrl)
-              .then((response) => {
-                if (!response.ok) {
-                  throw new Error(
-                    `Failed to fetch ${sound.name} from ${assetUrl}`
-                  );
-                }
-                return response.blob();
-              })
-              .then((blob) => {
-                zip.file(md5ext, blob);
-              })
-              .catch((error) => {
-                chrome.runtime.sendMessage({
-                  log: `Error fetching sound asset ${sound.name}:`,
-                  error: error.message,
-                });
-              });
+  for (const target of targets) {
+    // コスチュームを処理
+    for (const costume of target.costumes) {
+      const md5ext = costume.md5ext;
+      const assetUrl = `https://assets.scratch.mit.edu/internalapi/asset/${md5ext}/get/`;
 
-            fetchPromises.push(soundPromise);
-          });
+      const costumePromise = fetchAsset(assetUrl, costume.name)
+        .then((blob) => zip.file(md5ext, blob))
+        .catch((error) => {
+          console.error(
+            `Error fetching costume asset ${costume.name}: ${error.message}`
+          );
         });
 
-        // すべてのアセットのフェッチが完了した後にZIPを生成
-        Promise.all(fetchPromises)
-          .then(() => {
-            zip.generateAsync({ type: "blob" }).then((content) => {
-              // ZIPファイルをBase64エンコード
-              const reader = new FileReader();
-              reader.onload = function () {
-                const base64Content = reader.result.split(",")[1]; // Base64エンコードされたデータ部分を取得
+      fetchPromises.push(costumePromise);
+    }
 
-                const headers = {
-                  Accept: "application/vnd.github+json",
-                  Authorization: `Bearer ${github.token}`,
-                  "Content-Type": "application/json",
-                };
+    // サウンドを処理
+    for (const sound of target.sounds) {
+      const md5ext = sound.md5ext;
+      const assetUrl = `https://assets.scratch.mit.edu/internalapi/asset/${md5ext}/get/`;
 
-                // ブランチの存在確認
-                //const branchUrl = `${github.baseUrl}/repos/${github.user}/${github.repo}/branches/main`;
-                const branchExists = checkBranchExists();
-                if (!branchExists) {
-                  console.warn("Branch not found. Creating branch...");
-                  createBranch(main);
-                }
-                // ファイルをGitHubに更新
-                updateFileOnGitHub(param, base64Content, headers);
-              };
-
-              const checkBranchExists = async () => {
-                try {
-                  const endpoint = `repos/${github.user}/${github.repository}/branches/main`;
-                  const response = await github.get(endpoint)();
-                  console.log("ブランチ確認中OK:", response);
-                  return true;
-                } catch (error) {
-                  if (error.status === 404) {
-                    console.warn(`ブランチ main は存在しません。`);
-                    return false;
-                  } else {
-                    console.error("ブランチ確認中のエラー:", error);
-                    throw new Error("ブランチ確認中にエラーが発生しました");
-                  }
-                }
-              };
-
-              const updateFileOnGitHub = async (param, base64Content) => {
-                const filePath = `${param.projectId}/project.sb3`;
-                const endpoint = `repos/${github.user}/${github.repository}/contents/${filePath}`;
-
-                try {
-                  // ファイルのSHAを取得
-                  const sha = await getFileSha(endpoint);
-
-                  // リクエストデータを構築
-                  const requestData = {
-                    message: param.message,
-                    content: base64Content,
-                    branch: param.branch,
-                  };
-                  if (sha) {
-                    requestData.sha = sha;
-                  }
-
-                  // ファイル更新APIを呼び出し
-                  const response = await github.put(endpoint, requestData)();
-                  console.log("GitHub APIレスポンス:", response);
-
-                  return response; // 更新後のレスポンスを返す
-                } catch (error) {
-                  console.error("GitHub APIエラー:", error);
-                  chrome.runtime.sendMessage({
-                    error: `GitHubへのコミットでエラーが発生しました: ${error.message}`,
-                  });
-                  throw error; // エラーを再スロー
-                }
-              };
-
-              const getFileSha = async (endpoint) => {
-                try {
-                  const response = await github.get(endpoint)();
-                  return response.sha; // ファイルのSHAを返す
-                } catch (error) {
-                  if (error.status === 404) {
-                    console.warn(`ファイル "${filePath}" が存在しません。`);
-                    return null; // ファイルが存在しない場合はnullを返す
-                  } else {
-                    console.error("GitHub API GETエラー:", error);
-                    throw new Error(`GitHub API GETエラー: ${error.message}`);
-                  }
-                }
-              };
-
-              reader.onerror = function (err) {
-                reject(new Error("Base64エンコードエラー: " + err.message));
-              };
-
-              reader.readAsDataURL(content); // Blob を Base64 に変換
-            });
-          })
-          .catch((err) => {
-            chrome.runtime.sendMessage({
-              error: "ZIP生成中にエラーが発生しました:",
-              err,
-            });
-          });
-      })
-      .catch((error) => {
-        chrome.runtime.sendMessage({
-          log: `プロジェクトデータ取得エラー: ${error.message}`,
+      const soundPromise = fetchAsset(assetUrl, sound.name)
+        .then((blob) => zip.file(md5ext, blob))
+        .catch((error) => {
+          console.error(
+            `Error fetching sound asset ${sound.name}: ${error.message}`
+          );
         });
-      });
-  })
-  .catch((error) => {
-    chrome.runtime.sendMessage({
-      log: `APIエラー:: error`,
-    });
+
+      fetchPromises.push(soundPromise);
+    }
+  }
+
+  return Promise.all(fetchPromises);
+}
+
+async function generateZip(github, param) {
+  try {
+    const metaData = await fetchProjectMeta(param.projectId);
+    const token = metaData.project_token;
+
+    const projectData = await fetchProjectDetail(param.projectId, token);
+    const projectJson = JSON.stringify(projectData);
+
+    const zip = new JSZip();
+    zip.file("project.json", projectJson);
+
+    await processAssets(zip, projectData.targets);
+
+    const content = await zip.generateAsync({ type: "blob" });
+    const base64Content = await blobToBase64(content);
+
+    await updateFileOnGitHub(github, param, base64Content);
+  } catch (error) {
+    console.error("Error generating ZIP:", error.message);
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = (err) =>
+      reject(new Error("Base64 encoding error: " + err.message));
+    reader.readAsDataURL(blob);
   });
+}
 
-async function createBranch(branch) {
-  const baseBranch = "main";
-  const baseBranchEndpoint = `repos/${github.user}/${github.repository}/branches/${baseBranch}`;
-  const createBranchEndpoint = `repos/${github.user}/${github.repository}/git/refs`;
+async function updateFileOnGitHub(github, param, base64Content) {
+  const filePath = `${param.projectId}/project.sb3`;
+  const endpoint = `repos/${github.user}/${github.repository}/contents/${filePath}`;
 
   try {
-    // ベースブランチのSHAを取得
-    const baseBranchData = await github.get(baseBranchEndpoint)();
-    const baseSha = baseBranchData.commit.sha;
+    // ファイルのSHAを取得
+    const sha = await getFileSha(github, endpoint);
 
-    // 新しいブランチを作成
+    // リクエストデータを構築
     const requestData = {
-      ref: `refs/heads/${branch}`,
-      sha: baseSha,
+      message: param.message,
+      content: base64Content,
     };
+    if (sha) {
+      requestData.sha = sha;
+    }
 
-    const response = await github.post(createBranchEndpoint, requestData)();
-    console.log(`Branch ${branch} created successfully.`, response);
+    // ファイル更新APIを呼び出し
+    const response = await github.put(endpoint, requestData)();
+    console.log("GitHub API response:", response);
 
-    return response; // 作成したブランチのデータを返す
+    return response; // 更新後のレスポンスを返す
   } catch (error) {
-    console.error(`Error creating branch "${branch}":`, error);
-    throw new Error(`Failed to create branch "${branch}": ${error.message}`);
+    console.error("GitHub API error:", error);
+    throw new Error(`GitHub commit error: ${error.message}`);
+  }
+}
+
+async function getFileSha(github, endpoint) {
+  try {
+    const response = await github.get(endpoint)();
+    return response.sha; // ファイルのSHAを返す
+  } catch (error) {
+    if (error.status === 404) {
+      console.warn(`File "${endpoint}" does not exist.`);
+      return null; // ファイルが存在しない場合はnullを返す
+    } else {
+      console.error("GitHub API GET error:", error);
+      throw new Error(`GitHub API GET error: ${error.message}`);
+    }
   }
 }
