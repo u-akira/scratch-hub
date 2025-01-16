@@ -5,15 +5,14 @@
 // 4. 全て取得後、zipファイル(blob)を作成する
 //----------------------------------------------------------
 
-const param = self.param;
 const github = new GitHubAPI(
-  self.github.baseUrl,
-  self.github.user,
-  self.github.repository,
-  self.github.token
+  window.github.baseUrl,
+  window.github.user,
+  window.github.repository,
+  window.github.token
 );
 
-generateZip(github, param);
+generateZip(github, window.param);
 
 async function fetchProjectMeta(projectId) {
   const url = `https://api.scratch.mit.edu/projects/${projectId}`;
@@ -135,6 +134,7 @@ async function updateFileOnGitHub(github, param, base64Content) {
     if (sha) {
       requestData.sha = sha;
     }
+    console.log("GitHub API requestData:", requestData);
 
     // ファイル更新APIを呼び出し
     const response = await github.put(endpoint, requestData)();
