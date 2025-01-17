@@ -33,7 +33,9 @@
   };
 
   const filePath = `${projectId}/project.sb3`;
-  const endpoint = `repos/${github.user}/${github.repository}/contents/${filePath}?ref=${sha}`;
+  const endpoint = `repos/${github.user}/${
+    github.repository
+  }/contents/${filePath}?ref=${sha}&_=${new Date().getTime()}`;
 
   try {
     const title = $("#frc-title-1088").val();
