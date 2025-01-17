@@ -8,14 +8,23 @@
     self.github.token
   );
 
-  const getFile = async (endpoint) => {
+  const getDownloadUrl = async (endpoint) => {
     try {
+      console.log("Fetching download URL from GitHub API...");
       const data = await github.get(endpoint)();
-      return data; // ファイルのデータを返す
+      console.log("GitHub API GET response:", data);
+
+      // 正常なレスポンスかどうかを確認
+      if (data && data.download_url) {
+        return data.download_url;
+      } else {
+        console.warn("Download URL is not available in the response.");
+        return null;
+      }
     } catch (error) {
       if (error.status === 404) {
-        console.error(`File not found at path: ${filePath}`);
-        return null; // ファイルが存在しない場合はnullを返す
+        console.error(`File not found at path: ${endpoint}`);
+        return null;
       } else {
         console.error("GitHub API GETエラー:", error);
         throw new Error(`GitHub API GETエラー: ${error.message}`);
@@ -23,45 +32,36 @@
     }
   };
 
-  const filePath = encodeURIComponent(projectId + "/project.sb3");
+  const filePath = `${projectId}/project.sb3`;
   const endpoint = `repos/${github.user}/${github.repository}/contents/${filePath}?ref=${sha}`;
 
   try {
-    // GitHubからファイルを取得する
-    const shaResult = await getFile(endpoint);
+    const title = $("#frc-title-1088").val();
+    const downloadUrl = await getDownloadUrl(endpoint);
 
-    if (!shaResult || !shaResult.content) {
-      console.error("File content is not available.");
+    if (!downloadUrl) {
+      console.error("Failed to fetch the download URL.");
       return;
     }
 
-    const title = $("#frc-title-1088").val();
-    const decodedContent = atob(shaResult.content); // Base64デコード
+    fetch(downloadUrl)
+      .then((response) => response.blob())
+      .then((blob) => {
+        const a = document.createElement("a");
+        const url = URL.createObjectURL(blob);
 
-    // デコードされたデータを Blob として処理する
-    const byteArray = new Uint8Array(decodedContent.length);
-    for (let i = 0; i < decodedContent.length; i++) {
-      byteArray[i] = decodedContent.charCodeAt(i);
-    }
+        a.href = url;
+        a.download = `${title}.sb3`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
 
-    // Blobを生成
-    const blob = new Blob([byteArray], {
-      type: "application/octet-stream",
-    });
-
-    // ダウンロードリンク生成
-    const downloadUrl = URL.createObjectURL(blob);
-    console.log(`Generated download URL: ${downloadUrl}`);
-
-    const a = document.createElement("a");
-    a.href = downloadUrl;
-    a.download = `${title}.sb3`; // タイトルを使用
-    document.body.appendChild(a); // 必要に応じて DOM に追加
-    a.click();
-    document.body.removeChild(a); // クリーンアップ
-
-    URL.revokeObjectURL(downloadUrl);
-    console.log("File downloaded successfully.");
+        URL.revokeObjectURL(url);
+        console.log("File downloaded successfully.");
+      })
+      .catch((error) => {
+        console.error("ファイルのダウンロードに失敗しました:", error);
+      });
   } catch (error) {
     console.error("Error occurred during file download:", error);
   }
